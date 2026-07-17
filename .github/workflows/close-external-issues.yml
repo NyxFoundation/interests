@@ -1,0 +1,68 @@
+name: Close Issues from External Users
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  close-external-issue:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Check if issue author is a NyxFoundation member
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueAuthor = context.payload.issue.user.login;
+            const org = 'NyxFoundation';
+
+            // Check if the user is a member of the organization
+            let isMember = false;
+            try {
+              const { data: membership } = await github.rest.orgs.getMembershipForAuthenticatedUser({
+                org: org,
+              });
+              // This only works for the authenticated user, not for arbitrary users.
+              // We need a different approach.
+            } catch (e) {
+              // ignore
+            }
+
+            // Alternative: check if the user has push access (member/collaborator)
+            let hasPushAccess = false;
+            try {
+              const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: issueAuthor,
+              });
+              const level = permission.permission;
+              // 'admin', 'write' = can push, 'read', 'none' = external
+              hasPushAccess = level === 'admin' || level === 'write';
+            } catch (e) {
+              // If API call fails, assume external
+              hasPushAccess = false;
+            }
+
+            if (!hasPushAccess) {
+              // Close the issue and post a comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `👋 こんにちは @${issueAuthor}！\n\nこのリポジトリの issue 作成は **NyxFoundation メンバーのみ**に制限されています。\n\nご興味をお持ちいただきありがとうございます。ぜひ以下で気軽にご参加ください：\n- 既存の issue に **コメント** してディスカッションに参加\n- フィードバックや質問があれば遠慮なくお寄せください\n\nNyxFoundation メンバーがアイデアを検討し、issue に昇格させることもあります。`,
+              });
+
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                state: 'closed',
+                state_reason: 'not_planned',
+              });
+
+              console.log(`Closed issue #${context.issue.number} from external user: ${issueAuthor}`);
+            } else {
+              console.log(`Issue #${context.issue.number} from member ${issueAuthor} - kept open.`);
+            }
